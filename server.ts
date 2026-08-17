@@ -21,13 +21,21 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(process.cwd(), 'public')));
 app.use(express.static(path.join(process.cwd(), 'src/public')));
 
-// Seed benchmark corpus data on startup
-seedDatabase();
+// Seed benchmark corpus data on startup safely
+try {
+  seedDatabase();
+} catch (err) {
+  console.warn('[CALIBER Seed Warning]:', err);
+}
 
 // Re-index embeddings with configured model (gemini-embedding-2 / 768-dim)
-reindexAllEmbeddings().catch(err => {
-  console.warn('[CALIBER Startup] Background embedding re-index notice:', err?.message || err);
-});
+try {
+  reindexAllEmbeddings().catch(err => {
+    console.warn('[CALIBER Startup] Background embedding re-index notice:', err?.message || err);
+  });
+} catch (err) {
+  console.warn('[CALIBER Reindex Warning]:', err);
+}
 
 // API Routes
 app.use('/health', healthRouter);
@@ -47,7 +55,7 @@ async function setupViteOrStatic() {
       appType: 'spa'
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
@@ -58,7 +66,7 @@ async function setupViteOrStatic() {
 
 setupViteOrStatic();
 
-if (process.env.VERCEL !== '1') {
+if (process.env.VERCEL !== '1' && !process.env.VERCEL) {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[CALIBER Server] Industrial Intelligence Workbench running on http://0.0.0.0:${PORT}`);
   });
