@@ -1,0 +1,6 @@
+{
+  "name": "CALIBER Industrial Intelligence Workbench",
+  "description": "Cache-Aware Layered Index for Budgeted Evidence Retrieval with Resolution Ladders, Query Lab, Architecture Visualizer, and Document Inventory.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
