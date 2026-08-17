@@ -200,7 +200,7 @@ export function seedDatabase() {
     }
   ];
 
-  for (const sDoc of seedDocs) {
+    for (const sDoc of seedDocs) {
     let totalTokens = 0;
 
     // Register chunks and layers
@@ -209,8 +209,7 @@ export function seedDatabase() {
       const tokenCount = Math.round(c.raw.length / 4);
       totalTokens += tokenCount;
 
-      // L0 Chunk
-      db.chunks.set(c.id, {
+      const chunkData = {
         id: c.id,
         documentId: sDoc.id,
         chunkIndex: idx,
@@ -218,12 +217,12 @@ export function seedDatabase() {
         tokenCount,
         contentHash: `sha256:${c.id.toLowerCase()}_hash`,
         createdAt: new Date().toISOString()
-      });
+      };
+      db.chunks.set(c.id, chunkData);
 
-      // L1 Propositions
       c.propositions.forEach((pText, pIdx) => {
         const pId = `${c.id}-P${pIdx + 1}`;
-        db.propositions.set(pId, {
+        const propData = {
           id: pId,
           chunkId: c.id,
           documentId: sDoc.id,
@@ -232,11 +231,11 @@ export function seedDatabase() {
           tokenCount: Math.round(pText.length / 4),
           contentHash: `sha256:${pId.toLowerCase()}`,
           createdAt: new Date().toISOString()
-        });
+        };
+        db.propositions.set(pId, propData);
       });
 
-      // L2 Gist
-      db.gists.set(c.id, {
+      const gistData = {
         id: `GIST-${c.id}`,
         chunkId: c.id,
         documentId: sDoc.id,
@@ -249,11 +248,11 @@ export function seedDatabase() {
         },
         tokenCount: Math.round(c.gist.summary.length / 4),
         createdAt: new Date().toISOString()
-      });
+      };
+      db.gists.set(c.id, gistData);
 
-      // L3 Embedding
       const embeddingVec = generateDeterministicEmbedding(c.raw, CONFIG.EMBEDDING_DIMENSIONS);
-      db.embeddings.set(c.id, {
+      const embData = {
         id: `EMB-${c.id}`,
         chunkId: c.id,
         documentId: sDoc.id,
@@ -261,18 +260,18 @@ export function seedDatabase() {
         model: CONFIG.EMBEDDING_MODEL,
         dimensions: CONFIG.EMBEDDING_DIMENSIONS,
         createdAt: new Date().toISOString()
-      });
+      };
+      db.embeddings.set(c.id, embData);
     }
 
-    // Register Document
-    db.documents.set(sDoc.id, {
+    const docData = {
       id: sDoc.id,
       name: sDoc.name,
       filename: sDoc.filename,
       mimeType: sDoc.mimeType,
       fileSize: sDoc.fileSize,
       source: sDoc.source,
-      status: 'READY',
+      status: 'READY' as const,
       chunksCount: sDoc.chunks.length,
       totalTokens,
       summary: sDoc.summary,
@@ -280,12 +279,29 @@ export function seedDatabase() {
       createdAt: '2024-03-15T08:00:00.000Z',
       updatedAt: new Date().toISOString(),
       indexedAt: '2024-03-15 08:30:00 UTC',
-      l0Status: 'ready',
-      l1Status: 'ready',
-      l2Status: 'ready',
-      l3Status: 'ready'
-    });
+      l0Status: 'ready' as const,
+      l1Status: 'ready' as const,
+      l2Status: 'ready' as const,
+      l3Status: 'ready' as const
+    };
+    db.documents.set(sDoc.id, docData);
   }
+
+  // Persist seed data into MongoDB Atlas asynchronously
+  import('./mongo').then(({ getDb }) => getDb()).then(async (mongoDb) => {
+    await mongoDb.collection('documents').deleteMany({});
+    await mongoDb.collection('chunks').deleteMany({});
+    await mongoDb.collection('propositions').deleteMany({});
+    await mongoDb.collection('gists').deleteMany({});
+    await mongoDb.collection('embeddings').deleteMany({});
+
+    await mongoDb.collection('documents').insertMany(Array.from(db.documents.values()));
+    await mongoDb.collection('chunks').insertMany(Array.from(db.chunks.values()));
+    await mongoDb.collection('propositions').insertMany(Array.from(db.propositions.values()));
+    await mongoDb.collection('gists').insertMany(Array.from(db.gists.values()));
+    await mongoDb.collection('embeddings').insertMany(Array.from(db.embeddings.values()));
+    console.log('[CALIBER Seed] Seed data successfully committed to MongoDB Atlas.');
+  }).catch(err => console.warn('[CALIBER Seed Mongo Error]:', err?.message || err));
 
   db.addLog('SYS', 'SEED', `Corpus seed complete: ${db.documents.size} documents, ${db.chunks.size} chunks, ${db.propositions.size} propositions.`);
   console.log('[CALIBER Seed] Corpus populated successfully.');

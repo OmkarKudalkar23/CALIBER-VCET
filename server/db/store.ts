@@ -8,6 +8,7 @@ import {
   QueryExecutionRecord,
   SystemLogEntry
 } from '../types';
+import { getDb } from './mongo';
 
 class CaliberDatabaseStore {
   public documents: Map<string, BackendDocument> = new Map();
@@ -20,7 +21,33 @@ class CaliberDatabaseStore {
   public logs: SystemLogEntry[] = [];
 
   constructor() {
-    this.addLog('SYS', 'STORE', 'CALIBER In-Memory High-Performance Vector & Entity Store initialized.');
+    this.addLog('SYS', 'STORE', 'CALIBER Hybrid Map & MongoDB Atlas Store initialized.');
+    this.syncFromMongo().catch(err => console.warn('[CALIBER Store] Initial Mongo sync notice:', err?.message || err));
+  }
+
+  public async syncFromMongo() {
+    try {
+      const db = await getDb();
+      const docs = await db.collection<BackendDocument>('documents').find({}).toArray();
+      const chunks = await db.collection<BackendChunk>('chunks').find({}).toArray();
+      const props = await db.collection<BackendProposition>('propositions').find({}).toArray();
+      const gists = await db.collection<BackendGist>('gists').find({}).toArray();
+      const embs = await db.collection<BackendEmbedding>('embeddings').find({}).toArray();
+      const queries = await db.collection<QueryExecutionRecord>('queries').find({}).toArray();
+      const logs = await db.collection<SystemLogEntry>('logs').find({}).sort({ _id: -1 }).limit(200).toArray();
+
+      docs.forEach(d => this.documents.set(d.id, d));
+      chunks.forEach(c => this.chunks.set(c.id, c));
+      props.forEach(p => this.propositions.set(p.id, p));
+      gists.forEach(g => this.gists.set(g.chunkId, g));
+      embs.forEach(e => this.embeddings.set(e.chunkId, e));
+      queries.forEach(q => this.queries.set(q.id, q));
+      this.logs = logs;
+
+      console.log(`[CALIBER Store] Hydrated from MongoDB Atlas: ${this.documents.size} docs, ${this.chunks.size} chunks, ${this.propositions.size} propositions.`);
+    } catch (err: any) {
+      console.warn('[CALIBER Store] Could not sync from MongoDB Atlas:', err?.message || err);
+    }
   }
 
   public addLog(level: 'INFO' | 'WARN' | 'ERR!' | 'SYS', stage: string, message: string, queryId?: string, documentId?: string) {
@@ -37,6 +64,8 @@ class CaliberDatabaseStore {
     if (this.logs.length > 500) {
       this.logs.pop();
     }
+    // Async persist to MongoDB
+    getDb().then(db => db.collection('logs').insertOne({ ...entry })).catch(() => {});
     return entry;
   }
 
@@ -81,6 +110,16 @@ class CaliberDatabaseStore {
       .forEach(p => this.propositions.delete(p.id));
 
     this.addLog('INFO', 'STORE', `Document ${id} and associated L0-L3 indices successfully purged.`);
+
+    // Persist deletes in MongoDB
+    getDb().then(db => {
+      db.collection('documents').deleteOne({ id });
+      db.collection('chunks').deleteMany({ documentId: id });
+      db.collection('propositions').deleteMany({ documentId: id });
+      db.collection('gists').deleteMany({ documentId: id });
+      db.collection('embeddings').deleteMany({ documentId: id });
+    }).catch(err => console.warn('Mongo purge error:', err));
+
     return true;
   }
 }

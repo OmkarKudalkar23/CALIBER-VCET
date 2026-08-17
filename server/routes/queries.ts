@@ -24,54 +24,59 @@ function emitQueryEvent(queryId: string, eventName: string, data: any) {
 
 // POST /api/query
 queriesRouter.post('/', async (req, res) => {
-  const startTime = Date.now();
-  const {
-    query = 'What are Apple corporate and supply chain carbon neutrality targets for 2030?',
-    token_budget = 768,
-    top_k = 20,
-    deduplication = true
-  } = req.body;
+  try {
+    const startTime = Date.now();
+    const {
+      query = 'What are Apple corporate and supply chain carbon neutrality targets for 2030?',
+      token_budget = 768,
+      top_k = 20,
+      deduplication = true
+    } = req.body || {};
 
-  const queryId = `QRY-${Date.now().toString().slice(-6)}`;
+    const queryId = `QRY-${Date.now().toString().slice(-6)}`;
 
-  const pipelineStages = [
-    { id: '1', name: 'RETRIEVE', description: 'Dual-sparse & dense ANN index lookup across vector corpus', status: 'running' as const, durationMs: 0, outputCount: 0 },
-    { id: '2', name: 'CLEAN', description: 'Lossless text normalization & artifact stripping', status: 'idle' as const, durationMs: 0, outputCount: 0 },
-    { id: '3', name: 'DEDUP', description: 'Cross-document similarity hash clustering', status: 'idle' as const, durationMs: 0, outputCount: 0 },
-    { id: '4', name: 'SCORE', description: 'CALIBER transparent relevance scoring', status: 'idle' as const, durationMs: 0, outputCount: 0 },
-    { id: '5', name: 'SELECT', description: 'Dynamic resolution ladder knapsack budget selection', status: 'idle' as const, durationMs: 0, outputCount: 0 },
-    { id: '6', name: 'ASSEMBLE', description: 'Construct minimal context window prompt payload', status: 'idle' as const, durationMs: 0, outputCount: 0 }
-  ];
+    const pipelineStages = [
+      { id: '1', name: 'RETRIEVE', description: 'Dual-sparse & dense ANN index lookup across vector corpus', status: 'running' as const, durationMs: 0, outputCount: 0 },
+      { id: '2', name: 'CLEAN', description: 'Lossless text normalization & artifact stripping', status: 'idle' as const, durationMs: 0, outputCount: 0 },
+      { id: '3', name: 'DEDUP', description: 'Cross-document similarity hash clustering', status: 'idle' as const, durationMs: 0, outputCount: 0 },
+      { id: '4', name: 'SCORE', description: 'CALIBER transparent relevance scoring', status: 'idle' as const, durationMs: 0, outputCount: 0 },
+      { id: '5', name: 'SELECT', description: 'Dynamic resolution ladder knapsack budget selection', status: 'idle' as const, durationMs: 0, outputCount: 0 },
+      { id: '6', name: 'ASSEMBLE', description: 'Construct minimal context window prompt payload', status: 'idle' as const, durationMs: 0, outputCount: 0 }
+    ];
 
-  const queryRecord: QueryExecutionRecord = {
-    id: queryId,
-    queryText: query,
-    tokenBudget: token_budget,
-    topK: top_k,
-    deduplication,
-    status: 'RETRIEVING',
-    startedAt: new Date().toISOString(),
-    latencyMs: 0,
-    naiveTokens: 0,
-    caliberTokens: 0,
-    compressionRatio: 1,
-    tokenReduction: 0,
-    pipelineStages
-  };
+    const queryRecord: QueryExecutionRecord = {
+      id: queryId,
+      queryText: query,
+      tokenBudget: token_budget,
+      topK: top_k,
+      deduplication,
+      status: 'RETRIEVING',
+      startedAt: new Date().toISOString(),
+      latencyMs: 0,
+      naiveTokens: 0,
+      caliberTokens: 0,
+      compressionRatio: 1,
+      tokenReduction: 0,
+      pipelineStages
+    };
 
-  db.queries.set(queryId, queryRecord);
-  db.addLog('INFO', 'QUERY', `Query initiated: "${query.slice(0, 50)}..." (${queryId})`, queryId);
+    db.queries.set(queryId, queryRecord);
+    db.addLog('INFO', 'QUERY', `Query initiated: "${query.slice(0, 50)}..." (${queryId})`, queryId);
 
-  // If client wants async response immediately:
-  if (req.query.async === 'true') {
-    res.status(202).json({ query_id: queryId, status: 'PROCESSING' });
-    executeFullQuery(queryRecord, query, token_budget, top_k, deduplication, startTime);
-    return;
+    // If client wants async response immediately:
+    if (req.query.async === 'true') {
+      res.status(202).json({ query_id: queryId, status: 'PROCESSING' });
+      executeFullQuery(queryRecord, query, token_budget, top_k, deduplication, startTime).catch(err => console.error('Async query error:', err));
+      return;
+    }
+
+    // Otherwise execute synchronously and return complete payload
+    const result = await executeFullQuery(queryRecord, query, token_budget, top_k, deduplication, startTime);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[CALIBER Query Error]:', err);
+    res.status(500).json({ error: { code: 'QUERY_FAILED', message: err?.message || 'Internal query execution error' } });
   }
-
-  // Otherwise execute synchronously and return complete payload
-  const result = await executeFullQuery(queryRecord, query, token_budget, top_k, deduplication, startTime);
-  res.json(result);
 });
 
 async function executeFullQuery(
